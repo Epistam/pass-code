@@ -135,8 +135,9 @@ code_encrypt() {
 
 # Enable colors if we have LS_COLORS
 declare -A colors
-for pair in $(tr ':' '\n' <<< "$LS_COLORS"); do
-	colors["${pair%%=*}"]="\x1B[${pair##*=}m"
+for pair in $(tr ':' '
+' <<< "$LS_COLORS"); do
+	colors["${pair%%=*}"]="[${pair##*=}m"
 done
 
 code_colorize_dir() {
@@ -275,12 +276,12 @@ code_decode_grep_output() {
 	local enc dec x1b
 
 	# Escape code
-	x1b="$(echo -en '\x1B')"
+	x1b="$(echo -en '')"
 
 	while read -r line; do
 		enc="${line##*$PREFIX}"
 
-		# Delete color control codes (e.g. "\x1B[0m")
+		# Delete color control codes (e.g. "[0m")
 		enc="${enc#${x1b}*m}"
 		enc="${enc%${x1b}*}"
 
@@ -390,6 +391,38 @@ cmd_code_ls() {
 		| code_format_as_tree
 }
 
+cmd_code_menu() {
+	shopt -s nullglob globstar
+
+	# Match all files
+	password_files=( "$PREFIX"/**/*.gpg )
+	# Remove the prefix from file names
+	password_files=( "${password_files[@]#"$PREFIX"/}" )
+	# Remove the .gpg extension from file names
+	password_files=( "${password_files[@]%.gpg}" )
+
+	local password_names=()
+	# Fill an array with actual names as decoded by pass code
+	for pwd_file in "${password_files[@]}"; do
+		password_names+=($(pass code decode $pwd_file))
+	done
+
+	# Get the chosen password from dmenu
+	local password=$(printf '%s
+' "${password_names[@]}" | dmenu "$@")
+
+	[[ -n $password ]] || exit
+
+	if [[ $typeit -eq 0 ]]; then
+		pass code show -c "$password" 2>/dev/null # use pass code instead of pass
+	else
+		pass code show "$password" | { IFS= read -r pass; printf %s "$pass"; } |
+			xdotool type --clearmodifiers --file -
+	fi
+
+	set -f # Disable * expansion (shopt)
+}
+
 cmd_code_show() {
 	code_decrypt
 	code_encode_args "$@"
@@ -411,7 +444,7 @@ cmd_code_find() {
 cmd_code_grep() {
 	code_decrypt
 
-	rs="$(echo -e "\x1B[0m")"
+	rs="$(echo -e "[0m")"
 
 	cmd_grep "$@" \
 		| code_decode_grep_output
@@ -666,5 +699,6 @@ case "$1" in
 	test)                 shift; cmd_code_test "$@" ;;
 	encode|enc)           shift; cmd_code_lookup "Dx" "$@";;
 	decode|dec)           shift; cmd_code_lookup "Ex" "$@";;
+	menu)                 shift; cmd_code_menu "$@" ;;
 	*)                           cmd_code_usage "$@" ;;
 esac
