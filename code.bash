@@ -135,9 +135,8 @@ code_encrypt() {
 
 # Enable colors if we have LS_COLORS
 declare -A colors
-for pair in $(tr ':' '
-' <<< "$LS_COLORS"); do
-	colors["${pair%%=*}"]="[${pair##*=}m"
+for pair in $(tr ':' '\n' <<< "$LS_COLORS"); do
+	colors["${pair%%=*}"]="\x1B[${pair##*=}m"
 done
 
 code_colorize_dir() {
@@ -276,12 +275,12 @@ code_decode_grep_output() {
 	local enc dec x1b
 
 	# Escape code
-	x1b="$(echo -en '')"
+	x1b="$(echo -en '\x1B')"
 
 	while read -r line; do
 		enc="${line##*$PREFIX}"
 
-		# Delete color control codes (e.g. "[0m")
+		# Delete color control codes (e.g. "\x1B[0m")
 		enc="${enc#${x1b}*m}"
 		enc="${enc%${x1b}*}"
 
@@ -392,35 +391,12 @@ cmd_code_ls() {
 }
 
 cmd_code_menu() {
-	shopt -s nullglob globstar
+	code_decrypt
 
-	# Match all files
-	password_files=( "$PREFIX"/**/*.gpg )
-	# Remove the prefix from file names
-	password_files=( "${password_files[@]#"$PREFIX"/}" )
-	# Remove the .gpg extension from file names
-	password_files=( "${password_files[@]%.gpg}" )
+	local password_names=$(code_list_files | grep .) # Remove blank lines from unencrypted passwords
+	local password=$(printf '%s\n' "${password_names[@]}" | dmenu "$@")
 
-	local password_names=()
-	# Fill an array with actual names as decoded by pass code
-	for pwd_file in "${password_files[@]}"; do
-		password_names+=($(pass code decode $pwd_file))
-	done
-
-	# Get the chosen password from dmenu
-	local password=$(printf '%s
-' "${password_names[@]}" | dmenu "$@")
-
-	[[ -n $password ]] || exit
-
-	if [[ $typeit -eq 0 ]]; then
-		pass code show -c "$password" 2>/dev/null # use pass code instead of pass
-	else
-		pass code show "$password" | { IFS= read -r pass; printf %s "$pass"; } |
-			xdotool type --clearmodifiers --file -
-	fi
-
-	set -f # Disable * expansion (shopt)
+	pass code show -c "$password" 2>/dev/null # use pass code instead of pass
 }
 
 cmd_code_show() {
@@ -444,7 +420,7 @@ cmd_code_find() {
 cmd_code_grep() {
 	code_decrypt
 
-	rs="$(echo -e "[0m")"
+	rs="$(echo -e "\x1B[0m")"
 
 	cmd_grep "$@" \
 		| code_decode_grep_output
